@@ -2,65 +2,139 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 import sqlite3
 import os
 
-app = Flask(__name__)                                           #Flask app initialization
-app.secret_key = 'your_secret_key'
-db_path = os.path.abspath("airline_res.db")
+app = Flask(__name__)
+app.secret_key = 'your-secret-key'
 
-def init_db():                                                  #Database initialization
-    with sqlite3.connect(db_path) as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS reservations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                age INTEGER,
-                phone TEXT,
-                reservation_date TEXT
-            )
-        ''')
-init_db()
 
-def query_db(query, args=(), one=False):
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.execute(query, args)
-        rv = cur.fetchall()
-        conn.commit()
-        return (rv[0] if rv else None) if one else rv
+def get_db_connection():
+    db_path = os.path.join(os.path.dirname(__file__), 'database', 'airline.db')
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-@app.route('/')                                             #Main page api                                      
+
+def row_to_dict(row):
+    return dict(row)
+
+
+@app.route('/')
 def index():
-    reservations = query_db("SELECT * FROM reservations")
-    return render_template('index.html', reservations=reservations)
+    conn = get_db_connection()
 
-@app.route('/add', methods=['POST'])                                   #Add reservation api              
+    reservations = conn.execute('''
+        SELECT r.id, r.name, r.age, r.phone, r.reservation_date, r.seat_number,
+               f.flight_number, f.origin, f.destination
+        FROM reservations r
+        JOIN flights f ON r.flight_id = f.id
+    ''').fetchall()
+
+    flights = conn.execute('SELECT * FROM flights').fetchall()
+
+    # ✅ Convert each seat row into a plain dictionary
+    seats_raw = conn.execute('''
+        SELECT s.seat_number, s.flight_id
+        FROM seats s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM reservations r
+            WHERE r.seat_number = s.seat_number AND r.flight_id = s.flight_id
+        )
+    ''').fetchall()
+
+    seats = [dict(row) for row in seats_raw]  # 👈 THIS FIXES THE ISSUE
+
+    conn.close()
+    return render_template('index.html', reservations=reservations, flights=flights, seats=seats)
+
+
+
+@app.route('/add', methods=['POST'])
 def add_reservation():
-    data = request.form
-    if not data['age'].isdigit() or not data['phone'].isdigit():
-        flash("Age and Phone must be numeric.", "danger")
-    else:
-        query_db("INSERT INTO reservations (name, age, phone, reservation_date) VALUES (?, ?, ?, ?)",
-                 (data['name'], data['age'], data['phone'], data['date']))
-        flash("Reservation added.", "success")
+    name = request.form['name']
+    age = request.form['age']
+    phone = request.form['phone']
+    date = request.form['date']
+    seat = request.form['seat']
+    flight_id = request.form['flight_id']
+
+    if not all([name, age, phone, date, seat, flight_id]):
+        flash('Please fill all fields', 'danger')
+        return redirect(url_for('index'))
+
+    conn = get_db_connection()
+    existing = conn.execute(
+        'SELECT 1 FROM reservations WHERE flight_id = ? AND seat_number = ?',
+        (flight_id, seat)
+    ).fetchone()
+
+    if existing:
+        flash(f'Seat {seat} already booked for this flight.', 'danger')
+        conn.close()
+        return redirect(url_for('index'))
+
+    conn.execute(
+        'INSERT INTO reservations (name, age, phone, reservation_date, seat_number, flight_id) VALUES (?, ?, ?, ?, ?, ?)',
+        (name, age, phone, date, seat, flight_id)
+    )
+    conn.commit()
+    conn.close()
+    flash('Reservation added!', 'success')
     return redirect(url_for('index'))
 
-@app.route('/delete/<int:res_id>')                                #Delete reservation api           
+
+@app.route('/delete/<int:res_id>')
 def delete_reservation(res_id):
-    query_db("DELETE FROM reservations WHERE id = ?", (res_id,))
-    flash("Reservation deleted.", "info")
+    conn = get_db_connection()
+    conn.execute('DELETE FROM reservations WHERE id = ?', (res_id,))
+    conn.commit()
+    conn.close()
+    flash('Reservation deleted.', 'warning')
     return redirect(url_for('index'))
 
-@app.route('/edit', methods=['POST'])                                 #Edit reservation api
-def edit_reservation():
-    data = request.form
-    query_db('''
-        UPDATE reservations SET name=?, age=?, phone=?, reservation_date=? WHERE id=?
-    ''', (data['name'], data['age'], data['phone'], data['date'], data['res_id']))
-    flash("Reservation updated.", "primary")
-    return redirect(url_for('index'))
 
-@app.route('/get_reservation/<int:res_id>')                           #Get reservation api
+@app.route('/get_reservation/<int:res_id>')
 def get_reservation(res_id):
-    res = query_db("SELECT * FROM reservations WHERE id = ?", (res_id,), one=True)
-    return jsonify(res)
+    conn = get_db_connection()
+    res = conn.execute('SELECT * FROM reservations WHERE id = ?', (res_id,)).fetchone()
+    conn.close()
+
+    if res is None:
+        return jsonify({'error': 'Reservation not found'}), 404
+
+    return jsonify(row_to_dict(res))
+
+
+@app.route('/edit', methods=['POST'])
+def edit_reservation():
+    res_id = request.form['res_id']
+    name = request.form['name']
+    age = request.form['age']
+    phone = request.form['phone']
+    date = request.form['date']
+    seat = request.form['seat']
+    flight_id = request.form['flight_id']
+
+    conn = get_db_connection()
+
+    existing = conn.execute(
+        'SELECT 1 FROM reservations WHERE flight_id = ? AND seat_number = ? AND id != ?',
+        (flight_id, seat, res_id)
+    ).fetchone()
+
+    if existing:
+        flash(f'Seat {seat} is already taken.', 'danger')
+        conn.close()
+        return redirect(url_for('index'))
+
+    conn.execute('''
+        UPDATE reservations
+        SET name = ?, age = ?, phone = ?, reservation_date = ?, seat_number = ?, flight_id = ?
+        WHERE id = ?
+    ''', (name, age, phone, date, seat, flight_id, res_id))
+    conn.commit()
+    conn.close()
+    flash('Reservation updated.', 'success')
+    return redirect(url_for('index'))
+
 
 if __name__ == '__main__':
     app.run(debug=True)

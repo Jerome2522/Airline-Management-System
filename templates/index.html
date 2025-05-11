@@ -51,6 +51,7 @@
       background: rgba(0, 0, 0, 0.5);
       align-items: center;
       justify-content: center;
+      z-index: 1000;
     }
   </style>
 </head>
@@ -68,6 +69,18 @@
       <input type="number" name="age" placeholder="Age" required style="width:100%; margin-bottom:8px;" />
       <input type="text" name="phone" placeholder="Phone" required style="width:100%; margin-bottom:8px;" />
       <input type="date" name="date" required style="width:100%; margin-bottom:8px;" />
+      
+      <select name="flight_id" id="add_flight_id" required style="width:100%; margin-bottom:8px;" onchange="updateAddSeats()">
+        <option value="">Select Flight</option>
+        {% for flight in flights %}
+          <option value="{{ flight.id }}">{{ flight.flight_number }} - {{ flight.origin }} → {{ flight.destination }}</option>
+        {% endfor %}
+      </select>
+
+      <select name="seat" id="add_seat" required style="width:100%; margin-bottom:8px;">
+        <option value="">Select Seat</option>
+      </select>
+
       <div style="text-align:right;">
         <button type="button" class="btn btn-danger" onclick="hideAddModal()">Cancel</button>
         <button type="submit" class="btn">Save</button>
@@ -86,31 +99,46 @@
       <input type="number" name="age" id="edit_age" placeholder="Age" required style="width:100%; margin-bottom:8px;" />
       <input type="text" name="phone" id="edit_phone" placeholder="Phone" required style="width:100%; margin-bottom:8px;" />
       <input type="date" name="date" id="edit_date" required style="width:100%; margin-bottom:8px;" />
+
+      <select name="flight_id" id="edit_flight_id" required style="width:100%; margin-bottom:8px;" onchange="updateEditSeats()">
+        <option value="">Select Flight</option>
+        {% for flight in flights %}
+          <option value="{{ flight.id }}">{{ flight.flight_number }} - {{ flight.origin }} → {{ flight.destination }}</option>
+        {% endfor %}
+      </select>
+
+      <select name="seat" id="edit_seat" required style="width:100%; margin-bottom:8px;">
+        <option value="">Select Seat</option>
+      </select>
+
       <div style="text-align:right;">
         <button type="button" class="btn btn-danger" onclick="hideEditModal()">Cancel</button>
-        <button type="submit" class="btn">Save</button>
+        <button type="submit" class="btn">Update</button>
       </div>
     </form>
   </div>
 </div>
 
+<!-- Reservation Table -->
 <table>
   <thead>
     <tr>
-      <th>ID</th><th>Name</th><th>Age</th><th>Phone</th><th>Date</th><th>Actions</th>
+      <th>ID</th><th>Name</th><th>Age</th><th>Phone</th><th>Date</th><th>Seat</th><th>Flight</th><th>Actions</th>
     </tr>
   </thead>
   <tbody>
     {% for row in reservations %}
     <tr>
-      <td>{{ row[0] }}</td>
-      <td>{{ row[1] }}</td>
-      <td>{{ row[2] }}</td>
-      <td>{{ row[3] }}</td>
-      <td>{{ row[4] }}</td>
+      <td>{{ row.id }}</td>
+      <td>{{ row.name }}</td>
+      <td>{{ row.age }}</td>
+      <td>{{ row.phone }}</td>
+      <td>{{ row.reservation_date }}</td>
+      <td>{{ row.seat_number }}</td>
+      <td>{{ row.flight_number }} ({{ row.origin }} → {{ row.destination }})</td>
       <td>
-        <button class="btn" onclick="showEditModal('{{ row[0] }}', '{{ row[1] }}', '{{ row[2] }}', '{{ row[3] }}', '{{ row[4] }}')">Edit</button>
-        <a href="/delete/{{ row[0] }}" onclick="return confirm('Delete reservation for {{ row[1] }}?');">
+        <button class="btn" onclick="editReservation({{ row.id }})">Edit</button>
+        <a href="/delete/{{ row.id }}" onclick="return confirm('Delete reservation for {{ row.name }}?');">
           <button class="btn btn-danger">Delete</button>
         </a>
       </td>
@@ -119,34 +147,70 @@
   </tbody>
 </table>
 
+<!-- JavaScript -->
 <script>
+const allSeats = {{ seats | tojson }};
+
+function updateAddSeats() {
+  const flightId = document.getElementById('add_flight_id').value;
+  const seatSelect = document.getElementById('add_seat');
+  seatSelect.innerHTML = '<option value="">Select Seat</option>';
+  const filteredSeats = allSeats.filter(s => s.flight_id == flightId);
+  filteredSeats.forEach(s => {
+    const option = document.createElement('option');
+    option.value = s.seat_number;
+    option.textContent = s.seat_number;
+    seatSelect.appendChild(option);
+  });
+}
+
+function updateEditSeats(currentSeat = null) {
+  const flightId = document.getElementById('edit_flight_id').value;
+  const seatSelect = document.getElementById('edit_seat');
+  seatSelect.innerHTML = '<option value="">Select Seat</option>';
+  const filteredSeats = allSeats.filter(s => s.flight_id == flightId || s.seat_number == currentSeat);
+  filteredSeats.forEach(s => {
+    const option = document.createElement('option');
+    option.value = s.seat_number;
+    option.textContent = s.seat_number;
+    seatSelect.appendChild(option);
+  });
+  if (currentSeat) seatSelect.value = currentSeat;
+}
+
 function showAddModal() {
   document.getElementById('addModal').style.display = 'flex';
 }
 function hideAddModal() {
   document.getElementById('addModal').style.display = 'none';
 }
-function showEditModal(id, name, age, phone, date) {
-  document.getElementById('edit_res_id').value = id;
-  document.getElementById('edit_name').value = name;
-  document.getElementById('edit_age').value = age;
-  document.getElementById('edit_phone').value = phone;
-  document.getElementById('edit_date').value = date;
+function showEditModal() {
   document.getElementById('editModal').style.display = 'flex';
 }
 function hideEditModal() {
   document.getElementById('editModal').style.display = 'none';
 }
-// Optional: Close modal when clicking outside the form
+
+function editReservation(id) {
+  fetch(`/get_reservation/${id}`)
+    .then(res => res.json())
+    .then(data => {
+      document.getElementById('edit_res_id').value = data.id;
+      document.getElementById('edit_name').value = data.name;
+      document.getElementById('edit_age').value = data.age;
+      document.getElementById('edit_phone').value = data.phone;
+      document.getElementById('edit_date').value = data.reservation_date;
+      document.getElementById('edit_flight_id').value = data.flight_id;
+      updateEditSeats(data.seat_number);
+      showEditModal();
+    });
+}
+
 window.onclick = function(event) {
-  var addModal = document.getElementById('addModal');
-  var editModal = document.getElementById('editModal');
-  if (event.target === addModal) {
-    hideAddModal();
-  }
-  if (event.target === editModal) {
-    hideEditModal();
-  }
+  const addModal = document.getElementById('addModal');
+  const editModal = document.getElementById('editModal');
+  if (event.target === addModal) hideAddModal();
+  if (event.target === editModal) hideEditModal();
 }
 </script>
 
