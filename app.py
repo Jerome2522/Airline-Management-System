@@ -30,7 +30,6 @@ def index():
 
     flights = conn.execute('SELECT * FROM flights').fetchall()
 
-    # ✅ Convert each seat row into a plain dictionary
     seats_raw = conn.execute('''
         SELECT s.seat_number, s.flight_id
         FROM seats s
@@ -40,7 +39,7 @@ def index():
         )
     ''').fetchall()
 
-    seats = [dict(row) for row in seats_raw]  # 👈 THIS FIXES THE ISSUE
+    seats = [dict(row) for row in seats_raw]
 
     conn.close()
     return render_template('index.html', reservations=reservations, flights=flights, seats=seats)
